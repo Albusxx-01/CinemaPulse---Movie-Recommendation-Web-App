@@ -1,24 +1,46 @@
 import streamlit as st
 import pickle
 import pandas as pd
+import bz2
 
-# Page setup
+
+# --- 1. DATA LOADING (Optimized) ---
+@st.cache_resource
+def load_data():
+    with bz2.BZ2File('similarity_sparse.pbz2', 'rb') as f:
+        similarity_indices = pickle.load(f)
+    with bz2.BZ2File('movie_dict.pbz2', 'rb') as f:
+        movies_dict = pickle.load(f)
+    movies = pd.DataFrame(movies_dict)
+    return similarity_indices, movies
+
+similarity_indices, movies = load_data()
+
+
+# Initialize data
+try:
+    similarity, movies = load_data()
+except FileNotFoundError:
+    st.error("Compressed files not found! Please run the compression script first.")
+    st.stop()
+
+
+def recommend(movie):
+    movie_index = movies[movies['title'] == movie].index[0]
+    # We already stored the best indices, so just grab the first 5 (excluding itself)
+    # The first index [0] is usually the movie itself, so we take [1:6]
+    top_indices = similarity_indices[movie_index][1:6]
+
+    return [movies.iloc[i].title for i in top_indices]
+
+
+# --- 3. UI & STYLING ---
 st.set_page_config(page_title="CinemaPulse", page_icon="🍿", layout="wide")
 
-# UI Styling including centering logic
 st.markdown("""
     <style>
-    .stApp {
-        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-    }
-
-    /* Center aligning the header section */
-    .main-header {
-        text-align: center;
-        padding: 20px;
-    }
-
-    /* Glassmorphism Movie Cards */
+    .stApp { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); }
+    .main-header { text-align: center; padding: 20px; }
     .movie-card {
         background: rgba(255, 255, 255, 0.05);
         backdrop-filter: blur(10px);
@@ -32,36 +54,15 @@ st.markdown("""
         justify-content: center;
         transition: all 0.4s ease;
     }
-
     .movie-card:hover {
         transform: scale(1.05);
         border: 1px solid #00d2ff;
         box-shadow: 0 0 15px rgba(0, 210, 255, 0.5);
     }
-
-    .movie-title {
-        color: white;
-        font-weight: bold;
-        margin: 0;
-    }
+    .movie-title { color: white; font-weight: bold; margin: 0; font-size: 16px; }
     </style>
     """, unsafe_allow_html=True)
 
-
-# Helper function
-def recommend(movie):
-    movie_index = movies[movies['title'] == movie].index[0]
-    distances = similarity[movie_index]
-    movie_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
-    return [movies.iloc[i[0]].title for i in movie_list]
-
-
-# Load data
-movies_dict = pickle.load(open('movie_dict.pkl', 'rb'))
-movies = pd.DataFrame(movies_dict)
-similarity = pickle.load(open('similarity.pkl', 'rb'))
-
-# --- CENTERED HEADER SECTION ---
 st.markdown("""
     <div class="main-header">
         <h1>🍿 CinemaPulse</h1>
@@ -69,23 +70,21 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
-# Using columns to center the selectbox and button
-# The ratio [1, 2, 1] puts the content in the middle 50% of the screen
+# Centered Dropdown and Button
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_center:
     selected_movie_name = st.selectbox(
         "Which movie did you enjoy watching?",
-        movies['title'].values,
-        label_visibility="visible"
+        movies['title'].values
     )
 
-    # Nested columns for the button to keep it centered within the center column
+    # Center the button
     b_col1, b_col2, b_col3 = st.columns([1, 1, 1])
     with b_col2:
         btn = st.button("Generate Picks")
 
-# --- OUTPUT SECTION ---
+# --- 4. OUTPUT ---
 if btn:
     recommendations = recommend(selected_movie_name)
     st.write("##")
@@ -95,7 +94,7 @@ if btn:
         with cols[idx]:
             st.markdown(f"""
                 <div class="movie-card">
-                    <div style="font-size: 20px;">🎬</div>
+                    <div style="font-size: 20px; margin-bottom: 10px;">🎬</div>
                     <p class="movie-title">{movie_title}</p>
                 </div>
                 """, unsafe_allow_html=True)
